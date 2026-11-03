@@ -1,0 +1,6 @@
+{
+  "name": "고속도로 저속주행 참교육 (Highway Monster Rush)",
+  "description": "고속도로 1차로를 막고 있는 저속 주행 승용차들을 몬스터 트럭으로 시원하게 참교육하고 위험한 탱크를 회피하는 3D 고속 질주 아케이드 액션 게임",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

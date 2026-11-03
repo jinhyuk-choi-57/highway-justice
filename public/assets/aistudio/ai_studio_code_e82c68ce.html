@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>고속도로 저속주행 참교육</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome CDN for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        * {
+            font-family: 'Pretendard', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111827;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        /* Custom styling for retro style glassmorphism */
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen overflow-hidden text-white select-none">
+
+    <!-- Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay Layer -->
+    <div class="ui-layer flex flex-col justify-between p-4 md:p-6">
+        <!-- Top Header HUD -->
+        <div class="flex justify-between items-center w-full max-w-4xl mx-auto">
+            <!-- Hearts (Lives) -->
+            <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-2 border border-red-500/30 shadow-lg">
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-wider hidden sm:inline">생명</span>
+                <div id="hearts-container" class="flex gap-1.5 text-2xl text-red-500">
+                    <i class="fa-solid fa-heart animate-pulse"></i>
+                    <i class="fa-solid fa-heart animate-pulse"></i>
+                    <i class="fa-solid fa-heart animate-pulse"></i>
+                </div>
+            </div>
+
+            <!-- Timer -->
+            <div class="glass-panel px-6 py-2 rounded-2xl flex flex-col items-center border border-amber-500/30 shadow-lg">
+                <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">남은 시간</span>
+                <span id="timer-display" class="text-3xl font-black tracking-tight text-amber-300">60</span>
+            </div>
+
+            <!-- Score -->
+            <div class="glass-panel px-5 py-2 rounded-2xl flex flex-col items-end border border-blue-500/30 shadow-lg">
+                <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">파괴한 승용차</span>
+                <div class="flex items-baseline gap-1">
+                    <span id="score-display" class="text-3xl font-black text-blue-300">0</span>
+                    <span class="text-sm font-bold text-gray-400">대</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Combo / Message Floating Banner (Moved to top so road view is unobstructed) -->
+        <div class="absolute top-20 left-1/2 -translate-x-1/2 pointer-events-none z-20">
+            <div id="feedback-banner" class="opacity-0 transition-all duration-300 transform scale-75 glass-panel px-6 py-2 rounded-full border border-yellow-400/50 bg-yellow-500/20 text-yellow-300 font-black text-lg shadow-2xl">
+                참교육 성공! +1
+            </div>
+        </div>
+
+        <!-- Mobile Controls (Touch Alternative) -->
+        <div class="interactive flex justify-between items-center w-full max-w-md mx-auto mb-2 md:hidden">
+            <button id="btn-left" class="w-24 h-24 bg-white/10 active:bg-white/30 backdrop-blur-md rounded-3xl border border-white/20 flex items-center justify-center text-4xl text-white shadow-2xl active:scale-95 transition-transform">
+                <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <div class="text-xs text-center text-gray-400 font-bold bg-black/40 px-3 py-1 rounded-full">
+                차선 변경
+            </div>
+            <button id="btn-right" class="w-24 h-24 bg-white/10 active:bg-white/30 backdrop-blur-md rounded-3xl border border-white/20 flex items-center justify-center text-4xl text-white shadow-2xl active:scale-95 transition-transform">
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Start Modal Screen -->
+    <div id="start-modal" class="ui-layer interactive flex items-center justify-center bg-black/80 backdrop-blur-md">
+        <div class="glass-panel max-w-md w-11/12 p-8 rounded-3xl text-center border border-white/20 shadow-2xl flex flex-col items-center">
+            <div class="w-16 h-16 bg-red-600/20 border border-red-500/50 rounded-2xl flex items-center justify-center text-red-500 text-3xl mb-4">
+                <i class="fa-solid fa-truck-monster"></i>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-black text-white mb-2 tracking-tight">고속도로 저속주행 참교육</h1>
+            <p class="text-gray-400 text-sm mb-6 leading-relaxed">
+                답답하게 고속도로를 막고 있는 저속 승용차를 몬스터 트럭으로 밟아버리세요! 단, 튼튼한 <span class="text-amber-400 font-bold">탱크는 절대 피해야</span> 합니다!
+            </p>
+
+            <!-- Game Rules List -->
+            <div class="w-full bg-gray-900/60 rounded-2xl p-4 mb-6 text-left border border-white/5 text-xs space-y-2.5">
+                <div class="flex items-center gap-3 text-gray-300">
+                    <i class="fa-solid fa-car text-blue-400 text-base w-5 text-center"></i>
+                    <span><strong>승용차 (밟기)</strong>: 차선을 맞춰 뒤/옆에서 밟으면 +1점</span>
+                </div>
+                <div class="flex items-center gap-3 text-gray-300">
+                    <i class="fa-solid fa-shield-halved text-amber-400 text-base w-5 text-center"></i>
+                    <span><strong>탱크 (피하기)</strong>: 부딪히면 즉시 게임 종료!</span>
+                </div>
+                <div class="flex items-center gap-3 text-gray-300">
+                    <i class="fa-solid fa-heart-crack text-red-400 text-base w-5 text-center"></i>
+                    <span><strong>승용차 놓침</strong>: 1대 놓칠 때마다 하트 -1개 (총 3개)</span>
+                </div>
+                <div class="flex items-center gap-3 text-gray-300">
+                    <i class="fa-solid fa-keyboard text-green-400 text-base w-5 text-center"></i>
+                    <span><strong>조작법</strong>: 키보드 좌/우 방향키 또는 화면 버튼</span>
+                </div>
+            </div>
+
+            <button id="start-btn" class="w-full py-4 bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400 text-white font-black text-lg rounded-2xl shadow-xl hover:shadow-red-500/20 active:scale-95 transition-all">
+                참교육 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal Screen -->
+    <div id="game-over-modal" class="ui-layer interactive hidden flex items-center justify-center bg-black/85 backdrop-blur-md">
+        <div class="glass-panel max-w-md w-11/12 p-8 rounded-3xl text-center border border-white/20 shadow-2xl flex flex-col items-center">
+            <div id="game-over-icon" class="w-16 h-16 bg-yellow-500/20 border border-yellow-500/50 rounded-2xl flex items-center justify-center text-yellow-400 text-3xl mb-4">
+                <i class="fa-solid fa-trophy"></i>
+            </div>
+            <h2 id="game-over-title" class="text-3xl font-black text-white mb-1">참교육 완료!</h2>
+            <p id="game-over-reason" class="text-gray-400 text-xs mb-6">60초 동안 안전하게 참교육을 완료했습니다.</p>
+
+            <!-- Final Score Display -->
+            <div class="w-full bg-gradient-to-b from-gray-800/80 to-gray-900/80 rounded-2xl p-6 mb-6 border border-white/10 flex flex-col items-center">
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">최종 참교육 점수</span>
+                <div class="flex items-baseline gap-2">
+                    <span id="final-score" class="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500">0</span>
+                    <span class="text-lg font-bold text-gray-300">대 파괴</span>
+                </div>
+            </div>
+
+            <button id="restart-btn" class="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-lg rounded-2xl shadow-xl hover:shadow-blue-500/20 active:scale-95 transition-all">
+                다시 참교육하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME CONSTANTS & VARIABLES ---
+        const LIVES_MAX = 3; // 하트 수 3개
+        const GAME_DURATION = 60; // 60 Seconds
+        const LANES = [-3.2, 0, 3.2]; // X positions for 3 lanes (Left, Center, Right)
+        
+        let currentLane = 1; // 0: Left, 1: Center, 2: Right
+        let targetX = LANES[currentLane];
+        let score = 0;
+        let lives = LIVES_MAX;
+        let timeLeft = GAME_DURATION;
+        let isGameActive = false;
+        let gameTimer = null;
+        let spawnTimer = 0;
+        let initialSpawnInterval = 45; // 초기 스폰 간격
+        let spawnInterval = initialSpawnInterval; // frames between car spawns
+        let baseRoadSpeed = 1.2; // 초기 속도 1.2 설정
+        let frameCount = 0;
+
+        // Entities container
+        let playerCar;
+        let obstacles = []; // Active traffic on road
+        let particleEffects = [];
+        let laneLines = []; // 차선 객체 리스트
+
+        // Three.js Core Variables
+        let scene, camera, renderer;
+        let roadMesh;
+
+        // Touch handling
+        let touchStartX = 0;
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            initThreeJS();
+            setupEventListeners();
+            animate();
+        };
+
+        // Initialize Three.js Scene, Camera, and Renderer
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0f1d);
+            scene.fog = new THREE.FogExp2(0x0a0f1d, 0.015);
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5.5, 10);
+            camera.lookAt(0, 1.5, -5);
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lighting setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 50;
+            dirLight.shadow.camera.left = -10;
+            dirLight.shadow.camera.right = 10;
+            dirLight.shadow.camera.top = 20;
+            dirLight.shadow.camera.bottom = -10;
+            scene.add(dirLight);
+
+            // Add Environment Elements
+            createRoad();
+            createPlayerVehicle();
+
+            // Resize listener
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        // --- CREATING 3D ASSETS ---
+
+        // Create Procedural Highway Road
+        function createRoad() {
+            // Road Surface
+            const roadGeo = new THREE.PlaneGeometry(12, 200);
+            const roadMat = new THREE.MeshStandardMaterial({ 
+                color: 0x1f2937, 
+                roughness: 0.8 
+            });
+            roadMesh = new THREE.Mesh(roadGeo, roadMat);
+            roadMesh.rotation.x = -Math.PI / 2;
+            roadMesh.position.z = -80;
+            roadMesh.receiveShadow = true;
+            scene.add(roadMesh);
+
+            // Lane Dividers (선명한 흰색 점선 차선)
+            const lineGeo = new THREE.PlaneGeometry(0.25, 4);
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            laneLines = [];
+            
+            for (let z = 20; z > -180; z -= 8) {
+                // Left lane divider line (-1.6 위치)
+                const lineL = new THREE.Mesh(lineGeo, lineMat);
+                lineL.rotation.x = -Math.PI / 2;
+                lineL.position.set(-1.6, 0.02, z);
+                scene.add(lineL);
+                laneLines.push(lineL);
+
+                // Right lane divider line (1.6 위치)
+                const lineR = new THREE.Mesh(lineGeo, lineMat);
+                lineR.rotation.x = -Math.PI / 2;
+                lineR.position.set(1.6, 0.02, z);
+                scene.add(lineR);
+                laneLines.push(lineR);
+            }
+
+            // Road Shoulders (Yellow Lines)
+            const shoulderGeo = new THREE.PlaneGeometry(0.35, 200);
+            const shoulderMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+            
+            const shoulderL = new THREE.Mesh(shoulderGeo, shoulderMat);
+            shoulderL.rotation.x = -Math.PI / 2;
+            shoulderL.position.set(-4.8, 0.02, 0);
+            roadMesh.add(shoulderL);
+
+            const shoulderR = new THREE.Mesh(shoulderGeo, shoulderMat);
+            shoulderR.rotation.x = -Math.PI / 2;
+            shoulderR.position.set(4.8, 0.02, 0);
+            roadMesh.add(shoulderR);
+        }
+
+        // Create Monster Truck Player Vehicle
+        function createPlayerVehicle() {
+            playerCar = new THREE.Group();
+
+            // Main Body (Big Red Truck Body)
+            const bodyGeo = new THREE.BoxGeometry(2.0, 0.9, 3.2);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3, metalness: 0.5 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.3;
+            body.castShadow = true;
+            playerCar.add(body);
+
+            // Cabin / Roof
+            const cabinGeo = new THREE.BoxGeometry(1.6, 0.7, 1.6);
+            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.1 });
+            const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+            cabin.position.set(0, 1.9, -0.2);
+            cabin.castShadow = true;
+            playerCar.add(cabin);
+
+            // Front Bullbar / Bumper
+            const bumperGeo = new THREE.BoxGeometry(2.2, 0.5, 0.4);
+            const bumperMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.8 });
+            const bumper = new THREE.Mesh(bumperGeo, bumperMat);
+            bumper.position.set(0, 1.0, -1.7);
+            playerCar.add(bumper);
+
+            // Massive Monster Truck Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.6, 16);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.9 });
+
+            const wheelPositions = [
+                [-1.2, 0.65, 1.0],  // Rear Left
+                [1.2, 0.65, 1.0],   // Rear Right
+                [-1.2, 0.65, -1.0], // Front Left
+                [1.2, 0.65, -1.0]   // Front Right
+            ];
+
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                playerCar.add(wheel);
+            });
+
+            playerCar.position.set(LANES[currentLane], 0, 2);
+            scene.add(playerCar);
+        }
+
+        // Factory function for Civilian Slow Sedan
+        function createSedanMesh() {
+            const sedan = new THREE.Group();
+
+            // Lower Body
+            const bodyGeo = new THREE.BoxGeometry(1.6, 0.6, 2.8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.4 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.5;
+            body.castShadow = true;
+            sedan.add(body);
+
+            // Upper Cabin
+            const cabinGeo = new THREE.BoxGeometry(1.3, 0.5, 1.4);
+            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, roughness: 0.2 });
+            const cabin = new THREE.Mesh(cabinGeo, cylindricalCabinMat = cabinMat);
+            cabin.position.set(0, 0.95, -0.2);
+            cabin.castShadow = true;
+            sedan.add(cabin);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.3, 12);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1f2937 });
+            const wheelPositions = [
+                [-0.85, 0.3, 0.8], [0.85, 0.3, 0.8],
+                [-0.85, 0.3, -0.8], [0.85, 0.3, -0.8]
+            ];
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                sedan.add(wheel);
+            });
+
+            return sedan;
+        }
+
+        // Factory function for Heavy Tank Obstacle
+        function createTankMesh() {
+            const tank = new THREE.Group();
+
+            // Heavy Dark Base / Tracks
+            const trackGeo = new THREE.BoxGeometry(2.2, 0.6, 3.4);
+            const trackMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+            const tracks = new THREE.Mesh(trackGeo, trackMat);
+            tracks.position.y = 0.4;
+            tracks.castShadow = true;
+            tank.add(tracks);
+
+            // Main Hull
+            const hullGeo = new THREE.BoxGeometry(2.0, 0.7, 3.0);
+            const hullMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.6 });
+            const hull = new THREE.Mesh(hullGeo, hullMat);
+            hull.position.y = 0.8;
+            hull.castShadow = true;
+            tank.add(hull);
+
+            // Turret
+            const turretGeo = new THREE.BoxGeometry(1.4, 0.5, 1.4);
+            const turret = new THREE.Mesh(turretGeo, hullMat);
+            turret.position.set(0, 1.3, 0.1);
+            turret.castShadow = true;
+            tank.add(turret);
+
+            // Cannon Barrel
+            const barrelGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.8, 12);
+            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+            const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 1.35, 1.0);
+            barrel.castShadow = true;
+            tank.add(barrel);
+
+            return tank;
+        }
+
+        // --- GAME LOGIC & EVENT HANDLERS ---
+
+        function setupEventListeners() {
+            // Keyboard Controls
+            window.addEventListener('keydown', (e) => {
+                if (!isGameActive) {
+                    const gameOverModal = document.getElementById('game-over-modal');
+                    const startModal = document.getElementById('start-modal');
+                    if ((gameOverModal && !gameOverModal.classList.contains('hidden')) || (startModal && !startModal.classList.contains('hidden'))) {
+                        e.preventDefault();
+                        startGame();
+                    }
+                    return;
+                }
+                if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                    moveLane(-1);
+                } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                    moveLane(1);
+                }
+            });
+
+            // UI Buttons
+            document.getElementById('start-btn').addEventListener('click', startGame);
+            document.getElementById('restart-btn').addEventListener('click', startGame);
+            document.getElementById('btn-left').addEventListener('click', () => isGameActive && moveLane(-1));
+            document.getElementById('btn-right').addEventListener('click', () => isGameActive && moveLane(1));
+
+            // Touch Swipe Controls for mobile
+            window.addEventListener('touchstart', (e) => {
+                touchStartX = e.touches[0].clientX;
+            }, { passive: true });
+
+            window.addEventListener('touchend', (e) => {
+                if (!isGameActive) return;
+                const touchEndX = e.changedTouches[0].clientX;
+                const diffX = touchEndX - touchStartX;
+                if (Math.abs(diffX) > 40) {
+                    if (diffX < 0) moveLane(-1);
+                    else moveLane(1);
+                }
+            }, { passive: true });
+        }
+
+        // Change Lane (Left / Right)
+        function moveLane(direction) {
+            const newLane = currentLane + direction;
+            if (newLane >= 0 && newLane < LANES.length) {
+                currentLane = newLane;
+                targetX = LANES[currentLane];
+            }
+        }
+
+        // Start / Restart Game Session
+        function startGame() {
+            // Reset State Variables
+            score = 0;
+            lives = LIVES_MAX;
+            timeLeft = GAME_DURATION;
+            currentLane = 1;
+            targetX = LANES[currentLane];
+            baseRoadSpeed = 1.2;
+            spawnInterval = initialSpawnInterval;
+            frameCount = 0;
+
+            // Clear active obstacles from 3D scene
+            obstacles.forEach(obs => scene.remove(obs.mesh));
+            obstacles = [];
+
+            // Reset UI Displays
+            updateHUD();
+            document.getElementById('start-modal').classList.add('hidden');
+            document.getElementById('game-over-modal').classList.add('hidden');
+
+            // Reset Player Mesh Position
+            playerCar.position.set(LANES[currentLane], 0, 2);
+            playerCar.rotation.set(0, 0, 0);
+
+            // Enable Active Game State
+            isGameActive = true;
+
+            // Start 60-second Timer Interval
+            clearInterval(gameTimer);
+            gameTimer = setInterval(() => {
+                if (!isGameActive) return;
+                timeLeft--;
+                document.getElementById('timer-display').innerText = timeLeft;
+
+                if (timeLeft <= 0) {
+                    endGame("TIME_UP");
+                }
+            }, 1000);
+        }
+
+        // Update Hearts and Score UI
+        function updateHUD() {
+            document.getElementById('score-display').innerText = score;
+            
+            const heartsContainer = document.getElementById('hearts-container');
+            heartsContainer.innerHTML = '';
+            for (let i = 0; i < LIVES_MAX; i++) {
+                if (i < lives) {
+                    heartsContainer.innerHTML += '<i class="fa-solid fa-heart animate-pulse text-red-500"></i>';
+                } else {
+                    heartsContainer.innerHTML += '<i class="fa-solid fa-heart text-gray-700 opacity-40"></i>';
+                }
+            }
+        }
+
+        // Trigger Floating Feedback Text Banner
+        function showFeedback(text, isError = false) {
+            const banner = document.getElementById('feedback-banner');
+            banner.innerText = text;
+            if (isError) {
+                banner.className = "opacity-100 transition-all duration-300 transform scale-100 glass-panel px-6 py-2 rounded-full border border-red-500/50 bg-red-500/30 text-red-300 font-black text-xl shadow-2xl";
+            } else {
+                banner.className = "opacity-100 transition-all duration-300 transform scale-100 glass-panel px-6 py-2 rounded-full border border-yellow-400/50 bg-yellow-500/30 text-yellow-300 font-black text-xl shadow-2xl";
+            }
+
+            setTimeout(() => {
+                banner.classList.add('opacity-0', 'scale-75');
+            }, 800);
+        }
+
+        // Spawn Traffic (Sedan or Tank)
+        function spawnObstacle() {
+            const randomLane = Math.floor(Math.random() * 3);
+            
+            const elapsedTime = GAME_DURATION - timeLeft;
+            const tankProbability = Math.min(0.5, 0.25 + (elapsedTime / GAME_DURATION) * 0.25);
+            const isTank = Math.random() < tankProbability;
+
+            let mesh = isTank ? createTankMesh() : createSedanMesh();
+            mesh.position.set(LANES[randomLane], 0, -70);
+            scene.add(mesh);
+
+            obstacles.push({
+                mesh: mesh,
+                lane: randomLane,
+                type: isTank ? 'TANK' : 'SEDAN',
+                speedOffset: (Math.random() - 0.5) * 0.1,
+                isDestroyed: false
+            });
+        }
+
+        // Create Crushing Particle Effect on Car Destruction
+        function createExplosionEffect(position, isTank = false) {
+            const particleCount = isTank ? 30 : 18;
+            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: isTank ? 0xf59e0b : 0x3b82f6, 
+                emissive: isTank ? 0xd97706 : 0x1d4ed8 
+            });
+
+            for (let i = 0; i < particleCount; i++) {
+                const particle = new THREE.Mesh(geometry, material);
+                particle.position.copy(position);
+                particle.position.y += 0.5;
+
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.4,
+                    Math.random() * 0.4 + 0.2,
+                    (Math.random() - 0.5) * 0.4
+                );
+
+                scene.add(particle);
+                particleEffects.push({ mesh: particle, velocity: velocity, life: 30 });
+            }
+        }
+
+        // End Game Handle
+        function endGame(reason) {
+            isGameActive = false;
+            clearInterval(gameTimer);
+
+            const modal = document.getElementById('game-over-modal');
+            const title = document.getElementById('game-over-title');
+            const reasonText = document.getElementById('game-over-reason');
+            const finalScore = document.getElementById('final-score');
+            const icon = document.getElementById('game-over-icon');
+
+            finalScore.innerText = score;
+
+            if (reason === "TIME_UP") {
+                title.innerText = "60초 타임아웃!";
+                reasonText.innerText = "제한시간 60초가 모두 경과되었습니다.";
+                icon.className = "w-16 h-16 bg-yellow-500/20 border border-yellow-500/50 rounded-2xl flex items-center justify-center text-yellow-400 text-3xl mb-4";
+                icon.innerHTML = '<i class="fa-solid fa-stopwatch"></i>';
+            } else if (reason === "TANK_CRASH") {
+                title.innerText = "탱크 충돌 사고!";
+                reasonText.innerText = "피해야 하는 단단한 탱크와 충돌했습니다.";
+                icon.className = "w-16 h-16 bg-red-500/20 border border-red-500/50 rounded-2xl flex items-center justify-center text-red-500 text-3xl mb-4";
+                icon.innerHTML = '<i class="fa-solid fa-burst"></i>';
+            } else if (reason === "NO_LIVES") {
+                title.innerText = "참교육 실패!";
+                reasonText.innerText = `저속주행 승용차 ${LIVES_MAX}대를 그냥 보냈습니다 (하트 0개).`;
+                icon.className = "w-16 h-16 bg-red-500/20 border border-red-500/50 rounded-2xl flex items-center justify-center text-red-500 text-3xl mb-4";
+                icon.innerHTML = '<i class="fa-solid fa-heart-crack"></i>';
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        // Window Resize Handler
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- MAIN ANIMATION / RENDER LOOP ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isGameActive) {
+                frameCount++;
+
+                // 초기속도 1.2부터 60초까지 최종속도 1.5까지 선형적(Linear) 증가
+                const elapsedTime = GAME_DURATION - timeLeft;
+                const clampedElapsed = Math.min(GAME_DURATION, Math.max(0, elapsedTime));
+                let currentSpeed = 1.2 + (clampedElapsed / GAME_DURATION) * 0.3;
+
+                // 차량 스폰 주기 단축 (50초 기준 점진적 가속)
+                const cappedElapsedTime = Math.min(50, elapsedTime);
+                spawnInterval = Math.max(16, initialSpawnInterval - (cappedElapsedTime * 0.58));
+
+                // [수정] 차선 변경 속도 상향 (0.25 -> 0.4로 변경하여 훨씬 빠르고 기민하게 반응)
+                playerCar.position.x += (targetX - playerCar.position.x) * 0.4;
+
+                // Move Highway Lane Lines
+                laneLines.forEach(line => {
+                    line.position.z += currentSpeed;
+                    if (line.position.z > 20) {
+                        line.position.z -= 200;
+                    }
+                });
+
+                // Spawn Vehicles Periodic Check
+                spawnTimer++;
+                if (spawnTimer >= spawnInterval) {
+                    spawnObstacle();
+                    spawnTimer = 0;
+                }
+
+                // Handle Active Traffic & Collisions
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    const obs = obstacles[i];
+                    obs.mesh.position.z += currentSpeed + obs.speedOffset;
+
+                    const distZ = Math.abs(obs.mesh.position.z - playerCar.position.z);
+                    const distX = Math.abs(obs.mesh.position.x - playerCar.position.x);
+
+                    if (!obs.isDestroyed && distZ < 2.0 && distX < 1.4) {
+                        if (obs.type === 'SEDAN') {
+                            obs.isDestroyed = true;
+                            score++;
+                            updateHUD();
+                            createExplosionEffect(obs.mesh.position, false);
+                            showFeedback("참교육 성공! +1");
+                            
+                            scene.remove(obs.mesh);
+                            obstacles.splice(i, 1);
+                            continue;
+                        } else if (obs.type === 'TANK') {
+                            createExplosionEffect(playerCar.position, true);
+                            endGame("TANK_CRASH");
+                            break;
+                        }
+                    }
+
+                    // Missed Sedan Check
+                    if (obs.mesh.position.z > 12) {
+                        if (!obs.isDestroyed && obs.type === 'SEDAN') {
+                            lives--;
+                            updateHUD();
+                            showFeedback("승용차 놓침! 하트 -1", true);
+
+                            if (lives <= 0) {
+                                endGame("NO_LIVES");
+                                break;
+                            }
+                        }
+                        scene.remove(obs.mesh);
+                        obstacles.splice(i, 1);
+                    }
+                }
+
+                // Handle Explosive Particle Effects
+                for (let i = particleEffects.length - 1; i >= 0; i--) {
+                    const p = particleEffects[i];
+                    p.mesh.position.add(p.velocity);
+                    p.mesh.scale.multiplyScalar(0.95);
+                    p.life--;
+
+                    if (p.life <= 0) {
+                        scene.remove(p.mesh);
+                        particleEffects.splice(i, 1);
+                    }
+                }
+            }
+
+            // Render 3D Scene
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
