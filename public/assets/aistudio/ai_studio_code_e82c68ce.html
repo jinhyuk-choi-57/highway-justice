@@ -141,7 +141,7 @@
             </div>
 
             <button id="start-btn" class="w-full py-4 bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400 text-white font-black text-lg rounded-2xl shadow-xl hover:shadow-red-500/20 active:scale-95 transition-all">
-                참교육 시작하기
+                참교육 시작하기 (Space)
             </button>
         </div>
     </div>
@@ -165,7 +165,7 @@
             </div>
 
             <button id="restart-btn" class="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-lg rounded-2xl shadow-xl hover:shadow-blue-500/20 active:scale-95 transition-all">
-                다시 참교육하기
+                다시 참교육하기 (Space)
             </button>
         </div>
     </div>
@@ -188,6 +188,79 @@
         let spawnInterval = initialSpawnInterval; // frames between car spawns
         let baseRoadSpeed = 1.2; // 초기 속도 1.2 설정
         let frameCount = 0;
+
+        // 차선 스폰 제어 변수 (1번 및 3번 차선 3회 연속 스폰 및 핑퐁 방지)
+        let lastSpawnedLane = -1;
+        let consecutiveLaneCount = 0;
+        let consecutiveSideLaneCount = 0;
+        let lastOuterLane = -1;
+        let prevOuterLane = -1;
+        let consecutiveMiddleLaneCount = 0;
+
+        function getNextSpawnLane() {
+            const candidates = [];
+            for (let l = 0; l < 3; l++) {
+                // 1. 1번 차선(index 0) 3회 연속 스폰 방지
+                if (l === 0 && lastSpawnedLane === 0 && consecutiveLaneCount >= 2) continue;
+                // 2. 3번 차선(index 2) 3회 연속 스폰 방지
+                if (l === 2 && lastSpawnedLane === 2 && consecutiveLaneCount >= 2) continue;
+                // 3. 외곽 차선(0 또는 2) 3회 연속 스폰 방지
+                if ((l === 0 || l === 2) && consecutiveSideLaneCount >= 2) continue;
+
+                // 4. 1차선(0)과 3차선(2) 간의 즉각적인 직접 점프(0 -> 2 또는 2 -> 0) 방지
+                if (lastSpawnedLane === 0 && l === 2) continue;
+                if (lastSpawnedLane === 2 && l === 0) continue;
+
+                // 5. 1차선과 3차선의 번갈아 나오는 핑퐁(0 -> ... -> 2 -> ... -> 0) 반복 방지
+                if (l === 0 && prevOuterLane === 0 && lastOuterLane === 2) continue;
+                if (l === 2 && prevOuterLane === 2 && lastOuterLane === 0) continue;
+
+                // 가중치 설정: 중앙 2번 차선(1)의 출현 비율을 안정적으로 유지하고 직전이 외곽일 때 중앙 가중치 강화
+                let weight = 10;
+                if (l === 1) {
+                    weight = (lastSpawnedLane === 0 || lastSpawnedLane === 2) ? 18 : 12;
+                }
+                candidates.push({ lane: l, weight });
+            }
+
+            let chosenLane = 1;
+            if (candidates.length > 0) {
+                const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+                let rand = Math.random() * totalWeight;
+                for (const c of candidates) {
+                    if (rand < c.weight) {
+                        chosenLane = c.lane;
+                        break;
+                    }
+                    rand -= c.weight;
+                }
+            }
+
+            // 연속 동일 차선 카운트 갱신
+            if (chosenLane === lastSpawnedLane) {
+                consecutiveLaneCount++;
+            } else {
+                lastSpawnedLane = chosenLane;
+                consecutiveLaneCount = 1;
+            }
+
+            // 외곽 차선 카운트 및 1차선-3차선 번갈아 나옴 추적 갱신
+            if (chosenLane === 0 || chosenLane === 2) {
+                consecutiveSideLaneCount++;
+                consecutiveMiddleLaneCount = 0;
+                prevOuterLane = lastOuterLane;
+                lastOuterLane = chosenLane;
+            } else {
+                consecutiveSideLaneCount = 0;
+                consecutiveMiddleLaneCount++;
+                // 중앙 2번 차선이 2회 이상 나오면 외곽 번갈아 나옴 기록 초기화
+                if (consecutiveMiddleLaneCount >= 2) {
+                    prevOuterLane = -1;
+                }
+            }
+
+            return chosenLane;
+        }
 
         // Entities container
         let playerCar;
@@ -438,16 +511,22 @@
         // --- GAME LOGIC & EVENT HANDLERS ---
 
         function setupEventListeners() {
-            // Keyboard Controls
+            // Keyboard Controls (Space key for start / restart only)
             window.addEventListener('keydown', (e) => {
+                const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
                 if (!isGameActive) {
                     const gameOverModal = document.getElementById('game-over-modal');
                     const startModal = document.getElementById('start-modal');
                     if ((gameOverModal && !gameOverModal.classList.contains('hidden')) || (startModal && !startModal.classList.contains('hidden'))) {
-                        e.preventDefault();
-                        startGame();
+                        if (isSpace) {
+                            e.preventDefault();
+                            startGame();
+                        }
                     }
                     return;
+                }
+                if (isSpace) {
+                    e.preventDefault();
                 }
                 if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
                     moveLane(-1);
@@ -498,6 +577,14 @@
             baseRoadSpeed = 1.2;
             spawnInterval = initialSpawnInterval;
             frameCount = 0;
+
+            // 차선 스폰 카운터 리셋
+            lastSpawnedLane = -1;
+            consecutiveLaneCount = 0;
+            consecutiveSideLaneCount = 0;
+            lastOuterLane = -1;
+            prevOuterLane = -1;
+            consecutiveMiddleLaneCount = 0;
 
             // Clear active obstacles from 3D scene
             obstacles.forEach(obs => scene.remove(obs.mesh));
@@ -560,7 +647,8 @@
 
         // Spawn Traffic (Sedan or Tank)
         function spawnObstacle() {
-            const randomLane = Math.floor(Math.random() * 3);
+            // 1번 및 3번 차선 3회 연속 스폰 방지
+            const randomLane = getNextSpawnLane();
             
             const elapsedTime = GAME_DURATION - timeLeft;
             const tankProbability = Math.min(0.5, 0.25 + (elapsedTime / GAME_DURATION) * 0.25);

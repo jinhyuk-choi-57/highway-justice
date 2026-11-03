@@ -209,15 +209,15 @@
         </div>
       </div>
 
-      <!-- Any Key to Start Hint -->
+      <!-- Space Key to Start Hint -->
       <div class="text-xs text-amber-300 font-bold mb-3 flex items-center justify-center gap-1.5 animate-pulse">
         <i class="fa-solid fa-keyboard text-sm"></i>
-        <span>스페이스바, 엔터 또는 아무 키나 눌러 시작</span>
+        <span>스페이스바 [Space] 또는 버튼 클릭으로 시작</span>
       </div>
 
       <button id="start-btn" class="w-full py-4 bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black text-lg rounded-2xl shadow-xl shadow-red-500/30 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2">
         <i class="fa-solid fa-play"></i>
-        <span>참교육 시작하기</span>
+        <span>참교육 시작하기 (Space)</span>
       </button>
     </div>
   </div>
@@ -276,15 +276,15 @@
         </div>
       </div>
 
-      <!-- Any Key to Restart Hint (요구사항 완비) -->
+      <!-- Space Key to Restart Hint (스페이스바로만 시작/재시작) -->
       <div class="w-full bg-amber-500/15 border border-amber-500/30 rounded-xl px-4 py-2 mb-3 text-xs text-amber-300 font-bold flex items-center justify-center gap-2 animate-pulse">
         <i class="fa-solid fa-keyboard text-sm"></i>
-        <span>아무 키나 누르면 바로 다시 시작됩니다 (Press Any Key)</span>
+        <span>스페이스바 [Space] 를 누르면 다시 시작됩니다</span>
       </div>
 
       <button id="restart-btn" class="w-full py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-lg rounded-2xl shadow-xl shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
         <i class="fa-solid fa-rotate-right"></i>
-        <span>다시 참교육하기 (아무 키나 누르기)</span>
+        <span>다시 참교육하기 (Space)</span>
       </button>
     </div>
   </div>
@@ -852,6 +852,79 @@
     let touchStartX = 0;
     let lastGameOverTimestamp = 0;
 
+    // 차선 스폰 제어 변수 (1번 및 3번 차선 3회 연속 스폰 및 핑퐁 방지)
+    let lastSpawnedLane = -1;
+    let consecutiveLaneCount = 0;
+    let consecutiveSideLaneCount = 0; // 1번(0) 또는 3번(2) 외곽 차선 연속 등장 횟수
+    let lastOuterLane = -1;
+    let prevOuterLane = -1;
+    let consecutiveMiddleLaneCount = 0;
+
+    function getNextSpawnLane() {
+      const candidates = [];
+      for (let l = 0; l < 3; l++) {
+        // 1. 1번 차선(index 0) 3회 연속 스폰 방지
+        if (l === 0 && lastSpawnedLane === 0 && consecutiveLaneCount >= 2) continue;
+        // 2. 3번 차선(index 2) 3회 연속 스폰 방지
+        if (l === 2 && lastSpawnedLane === 2 && consecutiveLaneCount >= 2) continue;
+        // 3. 외곽 차선(0 또는 2) 3회 연속 스폰 방지
+        if ((l === 0 || l === 2) && consecutiveSideLaneCount >= 2) continue;
+
+        // 4. 1차선(0)과 3차선(2) 간의 즉각적인 직접 점프(0 -> 2 또는 2 -> 0) 방지
+        if (lastSpawnedLane === 0 && l === 2) continue;
+        if (lastSpawnedLane === 2 && l === 0) continue;
+
+        // 5. 1차선과 3차선의 번갈아 나오는 핑퐁(0 -> ... -> 2 -> ... -> 0) 반복 방지
+        if (l === 0 && prevOuterLane === 0 && lastOuterLane === 2) continue;
+        if (l === 2 && prevOuterLane === 2 && lastOuterLane === 0) continue;
+
+        // 가중치 설정: 중앙 2번 차선(1)의 출현 비율을 안정적으로 유지하고 직전이 외곽일 때 중앙 가중치 강화
+        let weight = 10;
+        if (l === 1) {
+          weight = (lastSpawnedLane === 0 || lastSpawnedLane === 2) ? 18 : 12;
+        }
+        candidates.push({ lane: l, weight });
+      }
+
+      let chosenLane = 1;
+      if (candidates.length > 0) {
+        const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+        let rand = Math.random() * totalWeight;
+        for (const c of candidates) {
+          if (rand < c.weight) {
+            chosenLane = c.lane;
+            break;
+          }
+          rand -= c.weight;
+        }
+      }
+
+      // 연속 동일 차선 카운트 갱신
+      if (chosenLane === lastSpawnedLane) {
+        consecutiveLaneCount++;
+      } else {
+        lastSpawnedLane = chosenLane;
+        consecutiveLaneCount = 1;
+      }
+
+      // 외곽 차선 카운트 및 1차선-3차선 번갈아 나옴 추적 갱신
+      if (chosenLane === 0 || chosenLane === 2) {
+        consecutiveSideLaneCount++;
+        consecutiveMiddleLaneCount = 0;
+        prevOuterLane = lastOuterLane;
+        lastOuterLane = chosenLane;
+      } else {
+        consecutiveSideLaneCount = 0;
+        consecutiveMiddleLaneCount++;
+        // 중앙 2번 차선이 2회 이상 나오면 외곽 번갈아 나옴 기록 초기화
+        if (consecutiveMiddleLaneCount >= 2) {
+          prevOuterLane = -1;
+        }
+      }
+
+      return chosenLane;
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       initThreeJS();
       setupEventListeners();
@@ -1064,6 +1137,14 @@
       spawnTimer = 0;
       isPaused = false;
 
+      // 차선 스폰 카운터 리셋
+      lastSpawnedLane = -1;
+      consecutiveLaneCount = 0;
+      consecutiveSideLaneCount = 0;
+      lastOuterLane = -1;
+      prevOuterLane = -1;
+      consecutiveMiddleLaneCount = 0;
+
       // Clear obstacles
       obstacles.forEach(o => scene.remove(o.mesh));
       obstacles = [];
@@ -1156,7 +1237,8 @@
     }
 
     function spawnObstacle() {
-      const lane = Math.floor(Math.random() * 3);
+      // 1번 및 3번 차선 3회 연속 스폰 방지 로직 적용
+      const lane = getNextSpawnLane();
       const elapsedTime = GAME_DURATION - timeLeft;
       const tankProb = Math.min(0.48, 0.22 + (elapsedTime / GAME_DURATION) * 0.26);
       const isTank = Math.random() < tankProb;
@@ -1316,30 +1398,39 @@
       modal.classList.remove('hidden');
     }
 
-    // Event Listeners (Including ANY KEY TO RESTART)
+    // Event Listeners (Space Key to Start / Restart Only)
     function setupEventListeners() {
-      // Global Any Key Handler
+      // Global Keydown Handler
       window.addEventListener('keydown', (e) => {
         soundManager.unlock();
 
-        // 1. If Game Over screen is showing -> Any key restarts game!
+        const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+
+        // 1. If Game Over screen is showing -> ONLY Spacebar restarts game!
         const gameOverModal = document.getElementById('game-over-modal');
         if (gameOverModal && !gameOverModal.classList.contains('hidden')) {
-          // 200ms guard to prevent accidental skip if holding key at collision
-          if (Date.now() - lastGameOverTimestamp < 200) return;
-          e.preventDefault();
-          startGame();
+          if (isSpace) {
+            e.preventDefault();
+            // 200ms guard to prevent accidental skip if holding space at collision
+            if (Date.now() - lastGameOverTimestamp < 200) return;
+            startGame();
+          }
           return;
         }
 
-        // 2. If Start modal is showing -> Space/Enter/Arrows starts game!
+        // 2. If Start modal is showing -> ONLY Spacebar starts game!
         const startModal = document.getElementById('start-modal');
         if (startModal && !startModal.classList.contains('hidden')) {
-          if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
+          if (isSpace) {
             e.preventDefault();
             startGame();
-            return;
           }
+          return;
+        }
+
+        // Prevent spacebar from scrolling the page during gameplay
+        if (isSpace) {
+          e.preventDefault();
         }
 
         // 3. During Active Gameplay

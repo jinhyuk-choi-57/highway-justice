@@ -86,10 +86,19 @@ export class GameEngine {
   private gameTimerInterval: ReturnType<typeof setInterval> | null = null;
 
   // Speed and spawning
+  private isMobile: boolean = false;
   private baseRoadSpeed: number = 1.2;
   private spawnInterval: number = 45;
   private spawnTimer: number = 0;
   private smokeSpawnTimer: number = 0;
+
+  // Lane spawn anti-clustering & anti-alternation controls (1번/3번 차선 3회 연속 스폰 및 핑퐁 방지)
+  private lastSpawnedLane: number = -1;
+  private consecutiveLaneCount: number = 0;
+  private consecutiveSideLaneCount: number = 0;
+  private lastOuterLane: number = -1;
+  private prevOuterLane: number = -1;
+  private consecutiveMiddleLaneCount: number = 0;
 
   // Entities
   private obstacles: ObstacleEntity[] = [];
@@ -106,12 +115,26 @@ export class GameEngine {
     this.container = container;
     this.callbacks = callbacks;
     this.highScore = parseInt(localStorage.getItem('monster_rush_high_score') || '0', 10);
+    this.isMobile = this.checkIsMobile();
 
     this.checkSoftwareGl();
     this.initThree();
     this.createEnvironment();
     this.createPlayer();
     this.bindWindowEvents();
+  }
+
+  public checkIsMobile(): boolean {
+    if (typeof window === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(ua);
+    const isTouchScreen = ('ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0)) && window.innerWidth <= 820;
+    const urlParam = new URLSearchParams(window.location.search).get('mobile') === '1';
+    return isMobileUA || isTouchScreen || urlParam;
+  }
+
+  public getIsMobile(): boolean {
+    return this.isMobile;
   }
 
   private checkSoftwareGl() {
@@ -324,6 +347,7 @@ export class GameEngine {
   }
 
   private onResize = () => {
+    this.isMobile = this.checkIsMobile();
     if (!this.container || !this.camera || !this.renderer) return;
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
@@ -431,6 +455,14 @@ export class GameEngine {
     this.spawnTimer = 0;
     this.isPaused = false;
 
+    // Reset lane spawn tracking
+    this.lastSpawnedLane = -1;
+    this.consecutiveLaneCount = 0;
+    this.consecutiveSideLaneCount = 0;
+    this.lastOuterLane = -1;
+    this.prevOuterLane = -1;
+    this.consecutiveMiddleLaneCount = 0;
+
     // Clear active obstacles
     this.obstacles.forEach((obs) => {
       this.scene.remove(obs.mesh);
@@ -494,8 +526,76 @@ export class GameEngine {
     return this.isGameActive;
   }
 
+  private getNextSpawnLane(): number {
+    const candidates: { lane: number; weight: number }[] = [];
+
+    for (let l = 0; l < 3; l++) {
+      // 1. 1번 차선(index 0) 3회 연속 스폰 방지
+      if (l === 0 && this.lastSpawnedLane === 0 && this.consecutiveLaneCount >= 2) continue;
+      // 2. 3번 차선(index 2) 3회 연속 스폰 방지
+      if (l === 2 && this.lastSpawnedLane === 2 && this.consecutiveLaneCount >= 2) continue;
+      // 3. 외곽 차선(0 또는 2) 3회 연속 스폰 방지
+      if ((l === 0 || l === 2) && this.consecutiveSideLaneCount >= 2) continue;
+
+      // 4. 1차선(0)과 3차선(2) 간의 즉각적인 직접 점프(0 -> 2 또는 2 -> 0) 방지
+      if (this.lastSpawnedLane === 0 && l === 2) continue;
+      if (this.lastSpawnedLane === 2 && l === 0) continue;
+
+      // 5. 1차선과 3차선의 번갈아 나오는 핑퐁(0 -> ... -> 2 -> ... -> 0) 반복 방지
+      // 이전에 0에서 2로 번갈아 나온 상태라면 바로 다음 외곽 차선으로 0이 다시 나오는 것을 차단
+      if (l === 0 && this.prevOuterLane === 0 && this.lastOuterLane === 2) continue;
+      // 이전에 2에서 0으로 번갈아 나온 상태라면 바로 다음 외곽 차선으로 2가 다시 나오는 것을 차단
+      if (l === 2 && this.prevOuterLane === 2 && this.lastOuterLane === 0) continue;
+
+      // 가중치 설정: 중앙 2번 차선(1)의 출현 비율을 안정적으로 유지하고 직전이 외곽일 때 중앙 가중치 강화
+      let weight = 10;
+      if (l === 1) {
+        weight = (this.lastSpawnedLane === 0 || this.lastSpawnedLane === 2) ? 18 : 12;
+      }
+      candidates.push({ lane: l, weight });
+    }
+
+    let chosenLane = 1;
+    if (candidates.length > 0) {
+      const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+      let rand = Math.random() * totalWeight;
+      for (const c of candidates) {
+        if (rand < c.weight) {
+          chosenLane = c.lane;
+          break;
+        }
+        rand -= c.weight;
+      }
+    }
+
+    // 연속 동일 차선 카운트 갱신
+    if (chosenLane === this.lastSpawnedLane) {
+      this.consecutiveLaneCount++;
+    } else {
+      this.lastSpawnedLane = chosenLane;
+      this.consecutiveLaneCount = 1;
+    }
+
+    // 외곽 차선 카운트 및 1차선-3차선 번갈아 나옴 추적 갱신
+    if (chosenLane === 0 || chosenLane === 2) {
+      this.consecutiveSideLaneCount++;
+      this.consecutiveMiddleLaneCount = 0;
+      this.prevOuterLane = this.lastOuterLane;
+      this.lastOuterLane = chosenLane;
+    } else {
+      this.consecutiveSideLaneCount = 0;
+      this.consecutiveMiddleLaneCount++;
+      // 중앙 2번 차선이 2회 이상 나오면 외곽 번갈아 나옴 기록 초기화
+      if (this.consecutiveMiddleLaneCount >= 2) {
+        this.prevOuterLane = -1;
+      }
+    }
+
+    return chosenLane;
+  }
+
   private spawnObstacle() {
-    const laneIndex = Math.floor(Math.random() * 3);
+    const laneIndex = this.getNextSpawnLane();
     const elapsedTime = this.GAME_DURATION - this.timeLeft;
 
     // Dynamic tank probability scaling from 22% up to 48% at late game
@@ -519,7 +619,7 @@ export class GameEngine {
       wheels: parts.wheels,
       lane: laneIndex,
       type: isTank ? 'TANK' : 'SEDAN',
-      speedOffset: (Math.random() - 0.5) * 0.12,
+      speedOffset: (Math.random() - 0.5) * (this.isMobile ? 0.06 : 0.12),
       isDestroyed: false,
     });
   }
@@ -664,18 +764,24 @@ export class GameEngine {
     if (this.isGameActive && !this.isPaused) {
       const elapsedTime = this.GAME_DURATION - this.timeLeft;
 
-      // 초기속도 1.2부터 60초까지 최종속도 1.5까지 선형적(Linear) 증가
+      // 모바일 환경 감지 시 속도를 2배 느리게 (0.5x 배속) 적용
+      const speedMultiplier = this.isMobile ? 0.5 : 1.0;
+
+      // 초기속도 1.2부터 60초까지 최종속도 1.5까지 선형적(Linear) 증가 (모바일은 0.6 ~ 0.75)
       const clampedElapsed = Math.min(this.GAME_DURATION, Math.max(0, elapsedTime));
-      this.baseRoadSpeed = 1.2 + (clampedElapsed / this.GAME_DURATION) * 0.3;
+      const desktopSpeed = 1.2 + (clampedElapsed / this.GAME_DURATION) * 0.3;
+      this.baseRoadSpeed = desktopSpeed * speedMultiplier;
 
       // Dynamic Speedometer KM/H update
       const currentKmh = Math.round(100 * this.baseRoadSpeed);
       this.callbacks.onSpeedUpdate(currentKmh);
-      soundManager.updateEnginePitch(this.baseRoadSpeed);
+      soundManager.updateEnginePitch(desktopSpeed);
 
       // Progressive spawn intervals: faster spawns as timer runs down
+      // 모바일은 0.5x 속도이므로 차량 스폰 간격을 2배로 늘려 차량 간 물리적 거리(간격)를 일정하게 유지
       const cappedElapsed = Math.min(50, elapsedTime);
-      this.spawnInterval = Math.max(16, 45 - Math.floor(cappedElapsed * 0.58));
+      const baseInterval = Math.max(16, 45 - Math.floor(cappedElapsed * 0.58));
+      this.spawnInterval = this.isMobile ? Math.round(baseInterval * 2) : baseInterval;
 
       // Player Lane Interpolation (Swift & agile 0.4 damping)
       this.playerTruck.position.x += (this.targetX - this.playerTruck.position.x) * 0.38;
@@ -731,7 +837,7 @@ export class GameEngine {
 
         // Spin civilian car wheels
         obs.wheels.forEach((w) => {
-          w.rotation.x -= 0.35;
+          w.rotation.x -= this.isMobile ? 0.18 : 0.35;
         });
 
         // Collision check

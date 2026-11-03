@@ -123,38 +123,40 @@ export const EnhancedGameView: React.FC<Props> = ({ onOpenReport }) => {
     engineRef.current.startGame();
   }, []);
 
-  // 아무 키나 누르면 게임 재시작 (Game Over 상태일 때)
+  // 스페이스바 [Space] 로만 게임 재시작 (Game Over 상태일 때)
   useEffect(() => {
     if (gameState !== 'GAMEOVER') return;
 
     // 사망 직후 키를 연타하고 있던 경우 실수로 바로 재시작되는 것을 방지하기 위한 200ms 보호 딜레이
     const modalOpenTime = Date.now();
-    const handleAnyKeyRestart = (e: KeyboardEvent) => {
+    const handleSpaceRestart = (e: KeyboardEvent) => {
+      const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+      if (!isSpace) return;
+      e.preventDefault();
       if (Date.now() - modalOpenTime < 200) return;
+      handleStartGame();
+    };
+
+    window.addEventListener('keydown', handleSpaceRestart);
+    return () => {
+      window.removeEventListener('keydown', handleSpaceRestart);
+    };
+  }, [gameState, handleStartGame]);
+
+  // 시작 화면에서도 스페이스바로만 시작 가능
+  useEffect(() => {
+    if (gameState !== 'START') return;
+
+    const handleSpaceStart = (e: KeyboardEvent) => {
+      const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+      if (!isSpace) return;
       e.preventDefault();
       handleStartGame();
     };
 
-    window.addEventListener('keydown', handleAnyKeyRestart);
+    window.addEventListener('keydown', handleSpaceStart);
     return () => {
-      window.removeEventListener('keydown', handleAnyKeyRestart);
-    };
-  }, [gameState, handleStartGame]);
-
-  // 시작 화면에서도 스페이스나 엔터 또는 아무 키 누르면 즉시 시작
-  useEffect(() => {
-    if (gameState !== 'START') return;
-
-    const handleStartKey = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
-        e.preventDefault();
-        handleStartGame();
-      }
-    };
-
-    window.addEventListener('keydown', handleStartKey);
-    return () => {
-      window.removeEventListener('keydown', handleStartKey);
+      window.removeEventListener('keydown', handleSpaceStart);
     };
   }, [gameState, handleStartGame]);
 
@@ -416,12 +418,18 @@ export const EnhancedGameView: React.FC<Props> = ({ onOpenReport }) => {
               </div>
             </div>
 
+            {/* Space Key to Start Hint */}
+            <div className="text-xs text-amber-300 font-bold mb-3 flex items-center justify-center gap-1.5 animate-pulse">
+              <Keyboard size={15} />
+              <span>스페이스바 [Space] 또는 버튼 클릭으로 시작</span>
+            </div>
+
             <button
               onClick={handleStartGame}
               className="w-full py-4 bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black text-lg rounded-2xl shadow-xl shadow-red-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Play size={20} className="fill-white" />
-              <span>참교육 시작하기</span>
+              <span>참교육 시작하기 (Space)</span>
             </button>
           </div>
         </div>
@@ -530,10 +538,10 @@ export const EnhancedGameView: React.FC<Props> = ({ onOpenReport }) => {
               );
             })()}
 
-            {/* Any Key Restart Hint */}
+            {/* Space Key Restart Hint */}
             <div className="bg-amber-500/15 border border-amber-500/30 rounded-xl px-4 py-2 mb-3 text-xs text-amber-300 font-bold flex items-center justify-center gap-2 animate-pulse">
               <Keyboard size={15} />
-              <span>아무 키나 누르면 바로 다시 시작됩니다 (Press Any Key)</span>
+              <span>스페이스바 [Space] 를 누르면 다시 시작됩니다</span>
             </div>
 
             <button
@@ -541,7 +549,7 @@ export const EnhancedGameView: React.FC<Props> = ({ onOpenReport }) => {
               className="w-full py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-lg rounded-2xl shadow-xl shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <RotateCcw size={20} />
-              <span>다시 참교육하기 (아무 키나 누르기)</span>
+              <span>다시 참교육하기 (Space)</span>
             </button>
           </div>
         </div>
